@@ -35,6 +35,9 @@ export const IPC = {
   ffmpegSetPath: 'ffmpeg:setPath',
   ffmpegProbe: 'ffmpeg:probe',
   ffmpegEncoders: 'ffmpeg:encoders',
+  ffmpegDownload: 'ffmpeg:download',
+  ffmpegDownloadStatus: 'ffmpeg:download:status',
+  eventFfmpegDownload: 'event:ffmpeg:download',
   // Updater
   updaterCheck: 'updater:check',
   updaterDownload: 'updater:download',

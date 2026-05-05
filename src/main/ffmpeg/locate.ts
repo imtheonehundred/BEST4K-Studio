@@ -1,21 +1,13 @@
-// Locate ffmpeg on disk. We try (in order): explicit setting, ffmpeg-static
-// (bundled with the app), bundled resource, system PATH.
+// Locate ffmpeg/ffprobe on disk. Search order:
+//   1. explicit Settings path
+//   2. downloaded BtbN build in userData/ffmpeg (preferred — most up-to-date)
+//   3. bundled resource (resources/ffmpeg/) for offline pre-builds
+//   4. system PATH
 import path from 'node:path';
 import fs from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { settingsRepo } from '../database/repositories';
-
-function ffmpegStaticPath(): string | null {
-  try {
-    // ffmpeg-static exports a string path. In packaged app, the binary lives
-    // under app.asar.unpacked, so we rewrite the path accordingly.
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const raw: string | null = require('ffmpeg-static');
-    if (!raw) return null;
-    const fixed = raw.replace('app.asar', 'app.asar.unpacked');
-    return fs.existsSync(fixed) ? fixed : (fs.existsSync(raw) ? raw : null);
-  } catch { return null; }
-}
+import { existingDownload } from './downloader';
 
 function bundledPath(): string {
   const isWin = process.platform === 'win32';
@@ -39,11 +31,23 @@ function whichSystem(): string | null {
 export function locateFfmpeg(): string | null {
   const s = settingsRepo.getAll();
   if (s.ffmpegPath && fs.existsSync(s.ffmpegPath)) return s.ffmpegPath;
-  const fromStatic = ffmpegStaticPath();
-  if (fromStatic) return fromStatic;
+  const downloaded = existingDownload();
+  if (downloaded) return downloaded.ffmpeg;
   const bundled = bundledPath();
   if (fs.existsSync(bundled)) return bundled;
   return whichSystem();
+}
+
+export function locateFfprobe(): string | null {
+  const downloaded = existingDownload();
+  if (downloaded) return downloaded.ffprobe;
+  // fallback: look beside ffmpeg
+  const ff = locateFfmpeg();
+  if (!ff) return null;
+  const dir = path.dirname(ff);
+  const exe = process.platform === 'win32' ? 'ffprobe.exe' : 'ffprobe';
+  const beside = path.join(dir, exe);
+  return fs.existsSync(beside) ? beside : null;
 }
 
 export function probeFfmpegVersion(binPath: string): string | null {

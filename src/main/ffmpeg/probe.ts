@@ -2,9 +2,7 @@
 // hints to surface to the user before they run a channel.
 
 import { spawn } from 'node:child_process';
-import path from 'node:path';
-import fs from 'node:fs';
-import { locateFfmpeg } from './locate';
+import { locateFfprobe } from './locate';
 import type { ChannelHeaders } from '../../shared/types';
 
 export interface ProbeResult {
@@ -18,13 +16,7 @@ export interface ProbeResult {
 }
 
 function ffprobePath(): string | null {
-  const ff = locateFfmpeg();
-  if (!ff) return null;
-  // ffprobe is shipped beside ffmpeg in static builds.
-  const dir = path.dirname(ff);
-  const bin = process.platform === 'win32' ? 'ffprobe.exe' : 'ffprobe';
-  const candidate = path.join(dir, bin);
-  return fs.existsSync(candidate) ? candidate : null;
+  return locateFfprobe();
 }
 
 function buildHeaderArgs(h?: ChannelHeaders): string[] {

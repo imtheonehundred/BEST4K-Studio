@@ -6,9 +6,10 @@ import { channelsRepo, serversRepo, profilesRepo, logsRepo, settingsRepo } from 
 import { ChannelInputSchema, ServerInputSchema } from '../shared/schemas';
 import { IPC } from '../shared/ipc';
 import { supervisor } from './processes/supervisor';
-import { locateFfmpeg, probeFfmpegVersion } from './ffmpeg/locate';
+import { locateFfmpeg, locateFfprobe, probeFfmpegVersion } from './ffmpeg/locate';
 import { probeSource } from './ffmpeg/probe';
 import { detectEncoders } from './ffmpeg/encoders';
+import { downloadFfmpeg, existingDownload, type DownloadProgress } from './ffmpeg/downloader';
 import { testConnection, installMediaMtx, rtmpPublishUrl, hlsPlaybackUrl } from './ssh/client';
 import { initUpdater, check as updaterCheck, download as updaterDownload, install as updaterInstall } from './updater';
 
@@ -128,6 +129,18 @@ function registerIpc() {
     return probeSource(opts.url, opts.headers, opts.timeoutMs);
   });
   ipcMain.handle(IPC.ffmpegEncoders, () => detectEncoders(true));
+  ipcMain.handle(IPC.ffmpegDownload, async () => {
+    try {
+      const r = await downloadFfmpeg(p => broadcast(IPC.eventFfmpegDownload, p));
+      return { ok: true, ...r };
+    } catch (e: any) {
+      return { ok: false, message: e?.message || String(e) };
+    }
+  });
+  ipcMain.handle(IPC.ffmpegDownloadStatus, () => {
+    const found = existingDownload();
+    return found ? { installed: true, ...found } : { installed: false };
+  });
 
   // Updater
   ipcMain.handle(IPC.updaterCheck, () => updaterCheck());
@@ -165,6 +178,15 @@ app.whenReady().then(() => {
   wireSupervisorEvents();
   createWindow();
   if (process.env.NODE_ENV !== 'development') initUpdater();
+
+  // Auto-download FFmpeg on first run when none is reachable.
+  setTimeout(() => {
+    const ff = locateFfmpeg();
+    if (!ff) {
+      void downloadFfmpeg(p => broadcast(IPC.eventFfmpegDownload, p))
+        .catch(() => { /* surfaced via the event channel */ });
+    }
+  }, 1500);
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
