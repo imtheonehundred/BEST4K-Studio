@@ -20,6 +20,7 @@
   "dependencies": {
     "better-sqlite3": "^11.3.0",
     "electron-updater": "^6.8.3",
+    "ffmpeg-static": "^5.3.0",
     "ssh2": "^1.16.0",
     "zod": "^3.23.8"
   },
@@ -45,7 +46,11 @@
     "appId": "com.best4k.studio",
     "productName": "BEST4K Studio",
     "publish": [
-      { "provider": "github", "owner": "imtheonehundred", "repo": "BEST4K-Studio" }
+      {
+        "provider": "github",
+        "owner": "imtheonehundred",
+        "repo": "BEST4K-Studio"
+      }
     ],
     "directories": {
       "output": "release",
@@ -53,7 +58,11 @@
     },
     "files": [
       "dist/**",
-      "package.json"
+      "package.json",
+      "node_modules/ffmpeg-static/**"
+    ],
+    "asarUnpack": [
+      "node_modules/ffmpeg-static/**"
     ],
     "extraResources": [
       {

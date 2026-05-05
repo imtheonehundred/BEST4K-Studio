@@ -47,17 +47,21 @@ function inputProtocolOpts(c: Channel): string[] {
   const hdr = buildHeadersString(h);
   if (hdr) args.push('-headers', hdr);
 
+  // Protocol whitelist: HLS needs `crypto` so AES-128 key URIs decrypt;
+  // covering the common protocols used by manifests/segments.
+  if (c.inputType === 'hls' || c.inputType === 'mp4') {
+    args.push('-protocol_whitelist', 'file,http,https,tcp,tls,crypto,rtmp,rtp,udp');
+  }
+  // DASH demuxer: allow any segment extension (m4s, mp4, etc.) and accept
+  // remote segments. Without this, segment loads silently fail.
+  if (c.inputType === 'dash') {
+    args.push('-allowed_extensions', 'ALL');
+  }
+
   if (c.inputType === 'hls') args.push(...HLS_LIVE_INPUT_OPTS);
   else if (['mpegts', 'rtmp', 'rtsp', 'dash'].includes(c.inputType)) args.push(...RECONNECT_OPTS);
   if (c.inputType === 'rtsp') args.push('-rtsp_transport', 'tcp');
 
-  // CENC decryption keys are wired up in buildCommand (after we know the
-  // input type / output mode) so we can choose the right strategy:
-  //   - DASH .mpd input  → mp4decrypt pipeline if available, else FFmpeg
-  //                        cenc_decryption_data (single key)
-  //   - mp4/fmp4 input   → -decryption_key (single key)
-  //   - HLS              → key URI in manifest is auto-fetched by FFmpeg
-  // The keys themselves are extracted in getAuthorizedKeys().
   return args;
 }
 
@@ -103,14 +107,22 @@ export function buildCommand(c: Channel, opts: { outputRoot: string; autoEncoder
   args.push('-hide_banner', '-loglevel', 'info', '-stats');
   args.push(...inputProtocolOpts(c));
 
-  // CENC decryption: input option, must precede -i.
-  // Mainline FFmpeg supports `-decryption_key <hex>` for mp4/fmp4 single-KID
-  // content via the mov demuxer. Multi-KID and live DASH require external
-  // tools (Bento4 mp4decrypt, shaka-packager). Honest limitation — this
-  // single-key path covers a significant slice but not everything.
+  // CENC decryption: input option, must precede -i. The right flag depends
+  // on the demuxer FFmpeg picks for this source:
+  //   - DASH manifest (.mpd, or sourceType=dash) → -cenc_decryption_key
+  //   - MP4 / fMP4 / CMAF                         → -decryption_key
+  //   - HLS                                       → key URI fetched from
+  //     manifest; provide auth via headers, not -decryption_key
   const keys = getAuthorizedKeys(c);
   if (keys?.length) {
-    args.push('-decryption_key', keys[0].key);
+    const key = keys[0].key;
+    if (c.inputType === 'dash') {
+      args.push('-cenc_decryption_key', key);
+    } else if (c.inputType === 'mp4' || c.inputType === 'mpegts') {
+      args.push('-decryption_key', key);
+    }
+    // HLS encrypted content uses the manifest's #EXT-X-KEY URI; the headers
+    // tab carries any auth needed to fetch that key. No CLI flag.
   }
 
   args.push('-i', c.inputUrl);
@@ -121,6 +133,20 @@ export function buildCommand(c: Channel, opts: { outputRoot: string; autoEncoder
   if (c.processing.logoOverlayPath && fs.existsSync(c.processing.logoOverlayPath)) {
     args.push('-i', c.processing.logoOverlayPath);
   }
+
+  // Track index maps. When the user has selected a specific track (because
+  // they have the matching key for that track only, common in multi-KID DRM
+  // content), we explicitly map it. The `?` suffix makes the map optional
+  // so FFmpeg won't fail when the track is absent.
+  const tv = c.processing.videoTrackIndex;
+  const ta = c.processing.audioTrackIndex;
+  const ts = c.processing.subtitleTrackIndex;
+  const hasOverlay = !!c.processing.logoOverlayPath && fs.existsSync(c.processing.logoOverlayPath);
+  // If we'll insert a -filter_complex/-vf below, mapping happens there.
+  if (!hasOverlay && tv != null && tv >= 0) args.push('-map', `0:v:${tv}?`);
+  if (ta != null && ta >= 0) args.push('-map', `0:a:${ta}?`);
+  if (ts != null && ts >= 0) args.push('-map', `0:s:${ts}?`);
+  if (ts === -1) args.push('-sn');
 
   if (isCopy) {
     args.push('-c', 'copy');

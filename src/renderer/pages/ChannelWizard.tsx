@@ -159,6 +159,23 @@ export function ChannelWizard({ existing, onClose, onSaved }: Props) {
 
       {tab === 'DRM' && (
         <div>
+          <div className="cols-3" style={{ marginBottom: 12 }}>
+            <label className="field"><span>Video track index (-1 = default)</span>
+              <input type="number" value={data.processing.videoTrackIndex ?? ''} placeholder="default"
+                onChange={e => set('processing', { ...data.processing, videoTrackIndex: e.target.value === '' ? null : Number(e.target.value) })} />
+            </label>
+            <label className="field"><span>Audio track index</span>
+              <input type="number" value={data.processing.audioTrackIndex ?? ''} placeholder="default"
+                onChange={e => set('processing', { ...data.processing, audioTrackIndex: e.target.value === '' ? null : Number(e.target.value) })} />
+            </label>
+            <label className="field"><span>Subtitle track (-1 = none)</span>
+              <input type="number" value={data.processing.subtitleTrackIndex ?? ''} placeholder="default"
+                onChange={e => set('processing', { ...data.processing, subtitleTrackIndex: e.target.value === '' ? null : Number(e.target.value) })} />
+            </label>
+          </div>
+          <div className="note">For multi-KID content: pick the track whose key you've supplied below. Use ffprobe (Input → Probe Source) to see available tracks.</div>
+          <div className="spacer" />
+
           <label className="field"><span>DRM Type</span>
             <select value={data.drm?.kind ?? 'none'} onChange={e => set('drm', { ...data.drm, kind: e.target.value as DrmKind })}>
               <option value="none">None</option>

@@ -47,6 +47,11 @@ export interface ProcessingOptions {
   logoOverlayPath?: string;
   textWatermark?: string;
   blurBox?: { x: number; y: number; w: number; h: number } | null;
+  // Track index selection (mainly for multi-track DRM content where each
+  // track has a different KID — pick the one whose KEY you possess).
+  videoTrackIndex?: number | null;
+  audioTrackIndex?: number | null;
+  subtitleTrackIndex?: number | null; // -1 disables subs
 }
 
 export interface OutputOptions {

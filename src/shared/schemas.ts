@@ -40,6 +40,9 @@ export const ProcessingSchema = z.object({
   blurBox: z.object({
     x: z.number(), y: z.number(), w: z.number(), h: z.number(),
   }).nullable().optional(),
+  videoTrackIndex: z.number().int().nullable().optional(),
+  audioTrackIndex: z.number().int().nullable().optional(),
+  subtitleTrackIndex: z.number().int().nullable().optional(),
 });
 
 export const OutputSchema = z.object({
