@@ -52,8 +52,13 @@
       "package.json"
     ],
     "win": {
-      "target": [{ "target": "nsis", "arch": ["x64"] }],
-      "artifactName": "BEST4K-Studio-Setup-${version}.${ext}"
+      "target": [
+        { "target": "nsis", "arch": ["x64"] },
+        { "target": "zip",  "arch": ["x64"] }
+      ],
+      "artifactName": "BEST4K-Studio-${version}-${arch}.${ext}",
+      "signingHashAlgorithms": ["sha256"],
+      "signAndEditExecutable": true
     },
     "nsis": {
       "oneClick": false,

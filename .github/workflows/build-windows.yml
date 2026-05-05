@@ -25,21 +25,44 @@ jobs:
       - name: Build renderer and main
         run: npm run build
 
-      - name: Package NSIS installer
+      - name: Decode signing certificate (if secret present)
+        id: cert
+        shell: pwsh
+        run: |
+          if ($env:WIN_CERT_PFX_BASE64) {
+            $bytes = [Convert]::FromBase64String($env:WIN_CERT_PFX_BASE64)
+            $path = "${{ runner.temp }}\code-sign.pfx"
+            [IO.File]::WriteAllBytes($path, $bytes)
+            "csc_link=$path" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+            Write-Host "::notice::Signing certificate loaded — installer will be signed."
+          } else {
+            Write-Host "::warning::No WIN_CERT_PFX_BASE64 secret set — installer will be UNSIGNED. Smart App Control will block it on Windows 11."
+          }
+        env:
+          WIN_CERT_PFX_BASE64: ${{ secrets.WIN_CERT_PFX_BASE64 }}
+
+      - name: Package NSIS installer + portable zip
+        env:
+          CSC_LINK: ${{ steps.cert.outputs.csc_link }}
+          CSC_KEY_PASSWORD: ${{ secrets.WIN_CERT_PASSWORD }}
         run: npx electron-builder --win --x64 --publish never
 
       - name: Upload installer artifact
         uses: actions/upload-artifact@v4
         with:
           name: BEST4K-Studio-Setup
-          path: release/*.exe
+          path: |
+            release/*.exe
+            release/*.zip
           if-no-files-found: error
 
       - name: Create GitHub Release on tag
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
-          files: release/*.exe
+          files: |
+            release/*.exe
+            release/*.zip
           generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

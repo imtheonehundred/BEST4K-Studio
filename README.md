@@ -34,6 +34,17 @@ npm run build           # compiles renderer + main + preload
 npm run dist:win        # NSIS installer in release/ (run on Windows)
 ```
 
+## Code signing (Windows)
+
+Without a signature, Windows Smart App Control will block the installer. The build is wired to sign automatically when these GitHub repo secrets are present:
+
+- `WIN_CERT_PFX_BASE64` — your `.pfx` certificate, base64-encoded (`base64 -i cert.pfx | pbcopy` on macOS).
+- `WIN_CERT_PASSWORD` — the export password for the `.pfx`.
+
+Free option for OSS: register at [SignPath.io](https://signpath.io) and replace the signing step with their action — instructions in [their docs](https://about.signpath.io/documentation/build-system-integration).
+
+End-user install runbook (covers Smart App Control & SmartScreen): see [`INSTALL.md`](INSTALL.md).
+
 ## Cross-platform note
 
 You can develop on macOS, but the Windows installer must be built on Windows.
