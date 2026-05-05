@@ -51,13 +51,6 @@
       "dist/**",
       "package.json"
     ],
-    "extraResources": [
-      {
-        "from": "resources",
-        "to": "resources",
-        "filter": ["**/*"]
-      }
-    ],
     "win": {
       "target": [{ "target": "nsis", "arch": ["x64"] }],
       "artifactName": "BEST4K-Studio-Setup-${version}.${ext}"
