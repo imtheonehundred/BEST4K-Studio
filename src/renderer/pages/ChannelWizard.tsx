@@ -164,7 +164,7 @@ export function ChannelWizard({ existing, onClose, onSaved }: Props) {
                   </table>
                 </div>
               )}
-              <div className="note">Use only with content you are authorized to decrypt.</div>
+              <div className="note">First key is passed to FFmpeg via <code>-decryption_key</code> for inline DASH/CENC decryption. Use only with content you are authorized to decrypt.</div>
             </>
           )}
           {(data.drm?.kind === 'widevine' || data.drm?.kind === 'playready') && (
@@ -276,7 +276,7 @@ export function ChannelWizard({ existing, onClose, onSaved }: Props) {
 
       {tab === 'Review' && (
         <div>
-          <pre style={{ background: '#04060a', padding: 14, borderRadius: 8, fontSize: 12, color: 'var(--fg-1)', overflow: 'auto' }}>
+          <pre style={{ background: 'var(--log-bg)', padding: 14, borderRadius: 8, fontSize: 12, color: 'var(--fg-1)', overflow: 'auto', border: '1px solid var(--line)' }}>
 {JSON.stringify(data, null, 2)}
           </pre>
         </div>

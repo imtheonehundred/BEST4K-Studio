@@ -50,6 +50,14 @@ function inputProtocolOpts(c: Channel): string[] {
   if (c.inputType === 'hls') args.push(...HLS_LIVE_INPUT_OPTS);
   else if (['mpegts', 'rtmp', 'rtsp', 'dash'].includes(c.inputType)) args.push(...RECONNECT_OPTS);
   if (c.inputType === 'rtsp') args.push('-rtsp_transport', 'tcp');
+
+  // ClearKey decryption (CENC) — applied before -i so FFmpeg's demuxer can
+  // decrypt protected DASH/CMAF/fMP4 inputs inline. FFmpeg accepts a single
+  // hex key; for multi-KID content the player must select the correct track.
+  if (c.drm?.kind === 'clearkey' && c.drm.clearkey?.length) {
+    const first = c.drm.clearkey[0];
+    args.push('-decryption_key', first.key);
+  }
   return args;
 }
 
@@ -121,14 +129,24 @@ export function buildCommand(c: Channel, opts: { outputRoot: string }): BuiltCom
     const dir = path.join(c.output.outputFolder || opts.outputRoot, c.slug);
     fs.mkdirSync(dir, { recursive: true });
     outputDir = dir;
-    const hlsTime = c.output.hlsTime ?? 3;
-    const hlsListSize = c.output.hlsListSize ?? 6;
+    // Better defaults for VLC live playback:
+    //  - longer window (40s @ 4s segments × 10) gives players room to breathe
+    //  - program_date_time tells VLC where the live edge is
+    //  - omit_endlist keeps the playlist marked as live across short gaps
+    //  - allow_cache 0 disables HTTP cache hints (we serve from local FS, but
+    //    if the user proxies via a server, this matters)
+    //  - dropped append_list because on supervisor restart it left orphan
+    //    segment numbers that VLC treated as gaps and froze
+    const hlsTime = c.output.hlsTime ?? 4;
+    const hlsListSize = c.output.hlsListSize ?? 10;
     args.push(
       '-f', 'hls',
       '-hls_time', String(hlsTime),
       '-hls_list_size', String(hlsListSize),
-      '-hls_flags', 'delete_segments+independent_segments+append_list',
-      '-hls_delete_threshold', '3',
+      '-hls_flags', 'delete_segments+independent_segments+program_date_time+omit_endlist',
+      '-hls_delete_threshold', '1',
+      '-hls_allow_cache', '0',
+      '-hls_segment_type', 'mpegts',
       '-hls_segment_filename', path.join(dir, 'seg_%05d.ts'),
       path.join(dir, 'index.m3u8'),
     );

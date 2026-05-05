@@ -17,7 +17,7 @@ export function Profiles() {
               {p.builtin && <span className="tag gold">Built-in</span>}
             </div>
             <div style={{ color: 'var(--fg-1)', fontSize: 12, margin: '8px 0 12px' }}>{p.description}</div>
-            <pre style={{ background: '#04060a', borderRadius: 6, padding: 8, fontSize: 11, color: 'var(--fg-1)', margin: 0 }}>
+            <pre style={{ background: 'var(--log-bg)', borderRadius: 6, padding: 8, fontSize: 11, color: 'var(--fg-1)', margin: 0, border: '1px solid var(--line)' }}>
               {JSON.stringify(p.config, null, 2)}
             </pre>
           </div>

@@ -53,7 +53,7 @@ export function Settings() {
         <label className="field"><span>Theme</span>
           <select value={settings.theme} onChange={e => update({ theme: e.target.value })}>
             <option value="dark">Dark (default)</option>
-            <option value="light" disabled>Light (coming later)</option>
+            <option value="light">Light</option>
           </select>
         </label>
       </div>

@@ -24,6 +24,12 @@ export default function App() {
   const store = useStore();
 
   useEffect(() => {
+    if (store.settings?.theme) {
+      document.documentElement.dataset.theme = store.settings.theme;
+    }
+  }, [store.settings?.theme]);
+
+  useEffect(() => {
     void store.refreshChannels();
     void store.refreshServers();
     void store.refreshProfiles();
