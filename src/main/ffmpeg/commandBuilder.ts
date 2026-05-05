@@ -51,12 +51,19 @@ function inputProtocolOpts(c: Channel): string[] {
   else if (['mpegts', 'rtmp', 'rtsp', 'dash'].includes(c.inputType)) args.push(...RECONNECT_OPTS);
   if (c.inputType === 'rtsp') args.push('-rtsp_transport', 'tcp');
 
-  // ClearKey decryption (CENC) — applied before -i so FFmpeg's demuxer can
-  // decrypt protected DASH/CMAF/fMP4 inputs inline. FFmpeg accepts a single
-  // hex key; for multi-KID content the player must select the correct track.
-  if (c.drm?.kind === 'clearkey' && c.drm.clearkey?.length) {
-    const first = c.drm.clearkey[0];
-    args.push('-decryption_key', first.key);
+  // CENC decryption — applied before -i so FFmpeg's demuxer can decrypt
+  // protected DASH/CMAF/fMP4 inputs inline. Widevine and PlayReady content
+  // is also CENC at the bytes level; if the user has supplied authorized
+  // raw keys (their own license server, test content, partner feed), the
+  // same path decrypts it. FFmpeg accepts a single hex key per invocation;
+  // for multi-KID content, choose the key that matches the active track.
+  const authorizedKeys =
+    c.drm?.kind === 'clearkey' ? c.drm.clearkey :
+    c.drm?.kind === 'widevine' ? c.drm.widevine?.keys :
+    c.drm?.kind === 'playready' ? c.drm.playready?.keys :
+    undefined;
+  if (authorizedKeys?.length) {
+    args.push('-decryption_key', authorizedKeys[0].key);
   }
   return args;
 }

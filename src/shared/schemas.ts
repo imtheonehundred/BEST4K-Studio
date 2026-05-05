@@ -20,10 +20,12 @@ export const DrmConfigSchema = z.object({
   widevine: z.object({
     licenseUrl: z.string().url().optional(),
     headers: z.record(z.string()).optional(),
+    keys: z.array(ClearKeyPairSchema).optional(),
   }).optional(),
   playready: z.object({
     licenseUrl: z.string().url().optional(),
     headers: z.record(z.string()).optional(),
+    keys: z.array(ClearKeyPairSchema).optional(),
   }).optional(),
 });
 

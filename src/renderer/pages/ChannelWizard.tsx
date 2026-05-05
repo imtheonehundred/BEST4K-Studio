@@ -51,13 +51,6 @@ export function ChannelWizard({ existing, onClose, onSaved }: Props) {
     }
   };
 
-  const parseClearKey = () => {
-    const r = parseClearKeyText(clearKeyText);
-    setClearKeyErrors(r.errors);
-    if (r.ok.length) {
-      setData(d => ({ ...d, drm: { kind: 'clearkey', clearkey: r.ok } }));
-    }
-  };
 
   return (
     <Modal open title={existing ? `Edit Channel: ${existing.name}` : 'Add Channel'} onClose={onClose}
@@ -139,36 +132,68 @@ export function ChannelWizard({ existing, onClose, onSaved }: Props) {
           <label className="field"><span>DRM Type</span>
             <select value={data.drm?.kind ?? 'none'} onChange={e => set('drm', { ...data.drm, kind: e.target.value as DrmKind })}>
               <option value="none">None</option>
-              <option value="clearkey">ClearKey</option>
-              <option value="widevine">Widevine (config only)</option>
-              <option value="playready">PlayReady (config only)</option>
+              <option value="clearkey">ClearKey (KID:KEY)</option>
+              <option value="widevine">Widevine</option>
+              <option value="playready">PlayReady</option>
             </select>
           </label>
+
           {data.drm?.kind === 'clearkey' && (
+            <KeyPairEditor
+              keys={data.drm.clearkey ?? []}
+              onChange={keys => set('drm', { ...data.drm, kind: 'clearkey', clearkey: keys })}
+              text={clearKeyText} setText={setClearKeyText}
+              errors={clearKeyErrors} setErrors={setClearKeyErrors}
+              footnote="First key is passed to FFmpeg via -decryption_key for inline DASH/CENC decryption."
+            />
+          )}
+
+          {data.drm?.kind === 'widevine' && (
             <>
-              <label className="field"><span>Paste KID:KEY pairs</span>
-                <textarea value={clearKeyText} onChange={e => setClearKeyText(e.target.value)}
-                  placeholder={'kid:key\nkid=key\nor JSON: {"keys":[{"kid":"...","k":"..."}]}'} />
-              </label>
-              <button className="sm" onClick={parseClearKey}>Parse</button>
-              {clearKeyErrors.length > 0 && <div className="note error">{clearKeyErrors.join(' • ')}</div>}
-              {(data.drm?.clearkey?.length ?? 0) > 0 && (
-                <div style={{ marginTop: 12 }}>
-                  <table className="b4k">
-                    <thead><tr><th>KID</th><th>KEY</th></tr></thead>
-                    <tbody>
-                      {data.drm!.clearkey!.map((p: ClearKeyPair, i: number) => (
-                        <tr key={i}><td><code>{p.kid}</code></td><td><code>{p.key.slice(0, 4)}…{p.key.slice(-2)}</code></td></tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-              <div className="note">First key is passed to FFmpeg via <code>-decryption_key</code> for inline DASH/CENC decryption. Use only with content you are authorized to decrypt.</div>
+              <div className="note warn">
+                <strong>Authorized use only.</strong> BEST4K Studio does <em>not</em> bypass Widevine.
+                You may paste raw KID:KEY pairs you obtained legitimately (your own license server,
+                test content, partner feed) — they decrypt CENC bytes the same way ClearKey does.
+                Runtime license-server integration is Phase 5.
+              </div>
+              <KeyPairEditor
+                keys={data.drm.widevine?.keys ?? []}
+                onChange={keys => set('drm', { ...data.drm, kind: 'widevine', widevine: { ...data.drm?.widevine, keys } })}
+                text={clearKeyText} setText={setClearKeyText}
+                errors={clearKeyErrors} setErrors={setClearKeyErrors}
+                footnote="First key is passed to FFmpeg via -decryption_key."
+              />
+              <div className="cols-2" style={{ marginTop: 12 }}>
+                <label className="field"><span>License URL (Phase 5)</span>
+                  <input value={data.drm.widevine?.licenseUrl ?? ''}
+                    onChange={e => set('drm', { ...data.drm, kind: 'widevine', widevine: { ...data.drm?.widevine, licenseUrl: e.target.value } })}
+                    placeholder="https://license.example.com/widevine" />
+                </label>
+              </div>
             </>
           )}
-          {(data.drm?.kind === 'widevine' || data.drm?.kind === 'playready') && (
-            <div className="note warn">Widevine/PlayReady wiring is config-only. Provide a license URL and headers; runtime integration is delivered in Phase 5.</div>
+
+          {data.drm?.kind === 'playready' && (
+            <>
+              <div className="note warn">
+                <strong>Authorized use only.</strong> Same model as Widevine — paste raw KID:KEY pairs
+                if you've obtained them legitimately. License-acquisition is Phase 5.
+              </div>
+              <KeyPairEditor
+                keys={data.drm.playready?.keys ?? []}
+                onChange={keys => set('drm', { ...data.drm, kind: 'playready', playready: { ...data.drm?.playready, keys } })}
+                text={clearKeyText} setText={setClearKeyText}
+                errors={clearKeyErrors} setErrors={setClearKeyErrors}
+                footnote="First key is passed to FFmpeg via -decryption_key."
+              />
+              <div className="cols-2" style={{ marginTop: 12 }}>
+                <label className="field"><span>License URL (Phase 5)</span>
+                  <input value={data.drm.playready?.licenseUrl ?? ''}
+                    onChange={e => set('drm', { ...data.drm, kind: 'playready', playready: { ...data.drm?.playready, licenseUrl: e.target.value } })}
+                    placeholder="https://license.example.com/playready" />
+                </label>
+              </div>
+            </>
           )}
         </div>
       )}
@@ -291,4 +316,51 @@ function toInput(c: Channel): ChannelInput {
     failoverUrls: c.failoverUrls ?? [], headers: c.headers ?? {}, drm: c.drm ?? { kind: 'none' },
     processing: c.processing, output: c.output, serverId: c.serverId ?? null,
   };
+}
+
+interface KeyPairEditorProps {
+  keys: ClearKeyPair[];
+  onChange: (keys: ClearKeyPair[]) => void;
+  text: string; setText: (s: string) => void;
+  errors: string[]; setErrors: (e: string[]) => void;
+  footnote: string;
+}
+
+function KeyPairEditor({ keys, onChange, text, setText, errors, setErrors, footnote }: KeyPairEditorProps) {
+  const parse = () => {
+    const r = parseClearKeyText(text);
+    setErrors(r.errors);
+    if (r.ok.length) onChange(r.ok);
+  };
+  const removeAt = (i: number) => onChange(keys.filter((_, idx) => idx !== i));
+  return (
+    <>
+      <label className="field"><span>Paste KID:KEY pairs</span>
+        <textarea value={text} onChange={e => setText(e.target.value)}
+          placeholder={'kid:key\nkid=key\nor JSON: {"keys":[{"kid":"...","k":"..."}]}'} />
+      </label>
+      <div className="row">
+        <button className="sm primary" onClick={parse}>Parse</button>
+        {keys.length > 0 && <button className="sm danger" onClick={() => onChange([])}>Clear all</button>}
+      </div>
+      {errors.length > 0 && <div className="note error" style={{ marginTop: 10 }}>{errors.join(' • ')}</div>}
+      {keys.length > 0 && (
+        <div style={{ marginTop: 12 }}>
+          <table className="b4k">
+            <thead><tr><th>KID</th><th>KEY (masked)</th><th></th></tr></thead>
+            <tbody>
+              {keys.map((p, i) => (
+                <tr key={i}>
+                  <td><code>{p.kid}</code></td>
+                  <td><code>{p.key.slice(0, 4)}…{p.key.slice(-2)}</code></td>
+                  <td className="actions"><button className="sm danger" onClick={() => removeAt(i)}>Remove</button></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      <div className="note" style={{ marginTop: 10 }}>{footnote} Use only with content you are authorized to decrypt.</div>
+    </>
+  );
 }

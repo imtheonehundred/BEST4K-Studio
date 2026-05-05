@@ -31,8 +31,11 @@ export interface DrmConfig {
   kind: DrmKind;
   clearkey?: ClearKeyPair[];
   // widevine/playready: user-supplied authorized config only.
-  widevine?: { licenseUrl?: string; headers?: Record<string, string> };
-  playready?: { licenseUrl?: string; headers?: Record<string, string> };
+  // `keys` accepts raw KID:KEY pairs the user is authorized to hold (e.g.
+  // from their own license server). They are passed to FFmpeg as CENC keys.
+  // `licenseUrl` + `headers` are stored for Phase 5 runtime license fetch.
+  widevine?: { licenseUrl?: string; headers?: Record<string, string>; keys?: ClearKeyPair[] };
+  playready?: { licenseUrl?: string; headers?: Record<string, string>; keys?: ClearKeyPair[] };
 }
 
 export interface ProcessingOptions {
