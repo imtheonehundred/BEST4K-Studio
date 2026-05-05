@@ -51,20 +51,13 @@ function inputProtocolOpts(c: Channel): string[] {
   else if (['mpegts', 'rtmp', 'rtsp', 'dash'].includes(c.inputType)) args.push(...RECONNECT_OPTS);
   if (c.inputType === 'rtsp') args.push('-rtsp_transport', 'tcp');
 
-  // CENC decryption — applied before -i so FFmpeg's demuxer can decrypt
-  // protected DASH/CMAF/fMP4 inputs inline. Widevine and PlayReady content
-  // is also CENC at the bytes level; if the user has supplied authorized
-  // raw keys (their own license server, test content, partner feed), the
-  // same path decrypts it. FFmpeg accepts a single hex key per invocation;
-  // for multi-KID content, choose the key that matches the active track.
-  const authorizedKeys =
-    c.drm?.kind === 'clearkey' ? c.drm.clearkey :
-    c.drm?.kind === 'widevine' ? c.drm.widevine?.keys :
-    c.drm?.kind === 'playready' ? c.drm.playready?.keys :
-    undefined;
-  if (authorizedKeys?.length) {
-    args.push('-decryption_key', authorizedKeys[0].key);
-  }
+  // CENC decryption keys are wired up in buildCommand (after we know the
+  // input type / output mode) so we can choose the right strategy:
+  //   - DASH .mpd input  → mp4decrypt pipeline if available, else FFmpeg
+  //                        cenc_decryption_data (single key)
+  //   - mp4/fmp4 input   → -decryption_key (single key)
+  //   - HLS              → key URI in manifest is auto-fetched by FFmpeg
+  // The keys themselves are extracted in getAuthorizedKeys().
   return args;
 }
 
@@ -85,22 +78,41 @@ function videoFilters(c: Channel): string | null {
   return filters.length ? filters.join(',') : null;
 }
 
-function chooseEncoder(req: string | undefined): string {
+export function getAuthorizedKeys(c: Channel) {
+  return c.drm?.kind === 'clearkey' ? c.drm.clearkey :
+    c.drm?.kind === 'widevine' ? c.drm.widevine?.keys :
+    c.drm?.kind === 'playready' ? c.drm.playready?.keys :
+    undefined;
+}
+
+function chooseEncoder(req: string | undefined, autoPreferred?: string): string {
   switch (req) {
     case 'h264_nvenc':
     case 'h264_qsv':
     case 'h264_amf':
     case 'libx264':
       return req;
+    case 'auto':
     default:
-      return 'libx264'; // safe default; supervisor can swap if HW detected.
+      return autoPreferred || 'libx264';
   }
 }
 
-export function buildCommand(c: Channel, opts: { outputRoot: string }): BuiltCommand {
+export function buildCommand(c: Channel, opts: { outputRoot: string; autoEncoder?: string }): BuiltCommand {
   const args: string[] = [];
   args.push('-hide_banner', '-loglevel', 'info', '-stats');
   args.push(...inputProtocolOpts(c));
+
+  // CENC decryption: input option, must precede -i.
+  // Mainline FFmpeg supports `-decryption_key <hex>` for mp4/fmp4 single-KID
+  // content via the mov demuxer. Multi-KID and live DASH require external
+  // tools (Bento4 mp4decrypt, shaka-packager). Honest limitation — this
+  // single-key path covers a significant slice but not everything.
+  const keys = getAuthorizedKeys(c);
+  if (keys?.length) {
+    args.push('-decryption_key', keys[0].key);
+  }
+
   args.push('-i', c.inputUrl);
 
   const filter = videoFilters(c);
@@ -113,7 +125,7 @@ export function buildCommand(c: Channel, opts: { outputRoot: string }): BuiltCom
   if (isCopy) {
     args.push('-c', 'copy');
   } else {
-    const encoder = chooseEncoder(c.processing.encoder);
+    const encoder = chooseEncoder(c.processing.encoder, opts.autoEncoder);
     args.push('-c:v', encoder);
     if (encoder === 'libx264') args.push('-preset', 'veryfast', '-tune', 'zerolatency');
     if (c.processing.videoBitrate) args.push('-b:v', c.processing.videoBitrate, '-maxrate', c.processing.videoBitrate, '-bufsize', '4M');

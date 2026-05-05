@@ -19,6 +19,7 @@
   },
   "dependencies": {
     "better-sqlite3": "^11.3.0",
+    "electron-updater": "^6.8.3",
     "ssh2": "^1.16.0",
     "zod": "^3.23.8"
   },
@@ -43,6 +44,9 @@
   "build": {
     "appId": "com.best4k.studio",
     "productName": "BEST4K Studio",
+    "publish": [
+      { "provider": "github", "owner": "imtheonehundred", "repo": "BEST4K-Studio" }
+    ],
     "directories": {
       "output": "release",
       "buildResources": "build"
@@ -52,15 +56,30 @@
       "package.json"
     ],
     "extraResources": [
-      { "from": "build/icon.png", "to": "icon.png" }
+      {
+        "from": "build/icon.png",
+        "to": "icon.png"
+      }
     ],
     "win": {
       "target": [
-        { "target": "nsis", "arch": ["x64"] },
-        { "target": "zip",  "arch": ["x64"] }
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "x64"
+          ]
+        }
       ],
       "artifactName": "BEST4K-Studio-${version}-${arch}.${ext}",
-      "signingHashAlgorithms": ["sha256"],
+      "signingHashAlgorithms": [
+        "sha256"
+      ],
       "signAndEditExecutable": true,
       "icon": "build/icon.ico"
     },

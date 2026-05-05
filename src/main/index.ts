@@ -7,7 +7,10 @@ import { ChannelInputSchema, ServerInputSchema } from '../shared/schemas';
 import { IPC } from '../shared/ipc';
 import { supervisor } from './processes/supervisor';
 import { locateFfmpeg, probeFfmpegVersion } from './ffmpeg/locate';
+import { probeSource } from './ffmpeg/probe';
+import { detectEncoders } from './ffmpeg/encoders';
 import { testConnection, installMediaMtx, rtmpPublishUrl, hlsPlaybackUrl } from './ssh/client';
+import { initUpdater, check as updaterCheck, download as updaterDownload, install as updaterInstall } from './updater';
 
 let mainWindow: BrowserWindow | null = null;
 
@@ -121,6 +124,15 @@ function registerIpc() {
     return { path: p, version: p ? probeFfmpegVersion(p) : null };
   });
   ipcMain.handle(IPC.ffmpegSetPath, (_e, p: string) => settingsRepo.update({ ffmpegPath: p || null }));
+  ipcMain.handle(IPC.ffmpegProbe, async (_e, opts: { url: string; headers?: any; timeoutMs?: number }) => {
+    return probeSource(opts.url, opts.headers, opts.timeoutMs);
+  });
+  ipcMain.handle(IPC.ffmpegEncoders, () => detectEncoders(true));
+
+  // Updater
+  ipcMain.handle(IPC.updaterCheck, () => updaterCheck());
+  ipcMain.handle(IPC.updaterDownload, () => updaterDownload());
+  ipcMain.handle(IPC.updaterInstall, () => updaterInstall());
 
   // System
   ipcMain.handle(IPC.systemPickFolder, async () => {
@@ -152,6 +164,7 @@ app.whenReady().then(() => {
   registerIpc();
   wireSupervisorEvents();
   createWindow();
+  if (process.env.NODE_ENV !== 'development') initUpdater();
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });

@@ -34,6 +34,8 @@ export function ChannelWizard({ existing, onClose, onSaved }: Props) {
   const [saving, setSaving] = useState(false);
   const [clearKeyText, setClearKeyText] = useState('');
   const [clearKeyErrors, setClearKeyErrors] = useState<string[]>([]);
+  const [probing, setProbing] = useState(false);
+  const [probeResult, setProbeResult] = useState<any>(null);
 
   const set = <K extends keyof ChannelInput>(key: K, value: ChannelInput[K]) => setData(d => ({ ...d, [key]: value }));
 
@@ -101,6 +103,34 @@ export function ChannelWizard({ existing, onClose, onSaved }: Props) {
             <textarea value={(data.failoverUrls || []).join('\n')}
               onChange={e => set('failoverUrls', e.target.value.split('\n').map(s => s.trim()).filter(Boolean))} />
           </label>
+          <div className="row" style={{ marginBottom: 10 }}>
+            <button className="sm" disabled={probing || !data.inputUrl} onClick={async () => {
+              setProbing(true); setProbeResult(null);
+              try {
+                const r = await window.api.ffmpeg.probe(data.inputUrl, data.headers);
+                setProbeResult(r);
+              } finally { setProbing(false); }
+            }}>{probing ? 'Probing…' : 'Probe Source (ffprobe)'}</button>
+            {probeResult && <button className="sm ghost" onClick={() => setProbeResult(null)}>Hide</button>}
+          </div>
+          {probeResult && (
+            <div className="card" style={{ padding: 12 }}>
+              {probeResult.ok ? (
+                <>
+                  <div className="row wrap" style={{ gap: 6, marginBottom: 8 }}>
+                    {probeResult.video && <span className="tag blue">{probeResult.video.codec} {probeResult.video.width}×{probeResult.video.height}@{probeResult.video.fps?.toFixed(1) || '?'}</span>}
+                    {probeResult.audio && <span className="tag">{probeResult.audio.codec} {probeResult.audio.channels}ch {probeResult.audio.sampleRate ? `${probeResult.audio.sampleRate / 1000}kHz` : ''}</span>}
+                    {probeResult.format?.bitrate && <span className="tag">{(probeResult.format.bitrate / 1000).toFixed(0)} kbps</span>}
+                    {probeResult.format?.duration != null && <span className="tag">{probeResult.format.duration === 0 ? 'live' : `${Math.round(probeResult.format.duration)}s`}</span>}
+                    {probeResult.drm?.encrypted && <span className="tag gold">⚠ encrypted ({probeResult.drm.scheme || 'CENC'})</span>}
+                  </div>
+                  <div style={{ fontSize: 11, color: 'var(--fg-2)' }}>{probeResult.format?.longName || probeResult.format?.name}</div>
+                </>
+              ) : (
+                <div className="note error">Probe failed: {probeResult.error}</div>
+              )}
+            </div>
+          )}
         </div>
       )}
 
@@ -238,7 +268,35 @@ export function ChannelWizard({ existing, onClose, onSaved }: Props) {
                 onChange={e => set('processing', { ...data.processing, textWatermark: e.target.value })} placeholder="© BEST4K" />
             </label>
           </div>
-          <div className="note">Logo overlay & blur boxes require Transcode mode and are wired in Phase 5.</div>
+          <label className="field"><span>Logo Overlay (PNG with alpha — placed top-right)</span>
+            <div className="row">
+              <input value={data.processing.logoOverlayPath ?? ''} placeholder="(none)" readOnly />
+              <button className="sm" disabled={data.processing.mode === 'copy'}
+                onClick={async () => {
+                  const p = await window.api.system.pickFile([{ name: 'Image', extensions: ['png', 'jpg', 'jpeg'] }]);
+                  if (p) set('processing', { ...data.processing, logoOverlayPath: p });
+                }}>Browse…</button>
+              {data.processing.logoOverlayPath && (
+                <button className="sm danger" onClick={() => set('processing', { ...data.processing, logoOverlayPath: undefined })}>Clear</button>
+              )}
+            </div>
+          </label>
+          <label className="field"><span>Blur Box (x,y,w,h in source pixels — leave blank to disable)</span>
+            <div className="row">
+              {(['x', 'y', 'w', 'h'] as const).map(k => (
+                <input key={k} type="number" placeholder={k}
+                  disabled={data.processing.mode === 'copy'}
+                  value={(data.processing.blurBox as any)?.[k] ?? ''}
+                  onChange={e => {
+                    const v = e.target.value === '' ? undefined : Number(e.target.value);
+                    const cur = data.processing.blurBox || { x: 0, y: 0, w: 0, h: 0 };
+                    const next = v === undefined ? null : { ...cur, [k]: v };
+                    set('processing', { ...data.processing, blurBox: next as any });
+                  }} />
+              ))}
+            </div>
+          </label>
+          <div className="note">Logo, watermark, and blur all require Transcode mode (filters can't run on stream copy).</div>
         </div>
       )}
 
@@ -327,22 +385,43 @@ interface KeyPairEditorProps {
 }
 
 function KeyPairEditor({ keys, onChange, text, setText, errors, setErrors, footnote }: KeyPairEditorProps) {
-  const parse = () => {
-    const r = parseClearKeyText(text);
+  // Pre-populate the textarea with existing keys when the editor mounts (or
+  // when the saved keys change) so users see what was previously saved.
+  React.useEffect(() => {
+    if (keys.length && !text) {
+      setText(keys.map(k => `${k.kid}:${k.key}`).join('\n'));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [keys.length]);
+
+  // Auto-parse as the user types — every textarea change re-parses and
+  // updates `keys` if at least one valid pair is found. This means the user
+  // doesn't have to click "Parse" before saving.
+  const onText = (v: string) => {
+    setText(v);
+    if (!v.trim()) { onChange([]); setErrors([]); return; }
+    const r = parseClearKeyText(v);
     setErrors(r.errors);
     if (r.ok.length) onChange(r.ok);
   };
-  const removeAt = (i: number) => onChange(keys.filter((_, idx) => idx !== i));
+
+  const removeAt = (i: number) => {
+    const next = keys.filter((_, idx) => idx !== i);
+    onChange(next);
+    setText(next.map(k => `${k.kid}:${k.key}`).join('\n'));
+  };
+
   return (
     <>
       <label className="field"><span>Paste KID:KEY pairs</span>
-        <textarea value={text} onChange={e => setText(e.target.value)}
+        <textarea value={text} onChange={e => onText(e.target.value)}
           placeholder={'kid:key\nkid=key\nor JSON: {"keys":[{"kid":"...","k":"..."}]}'} />
       </label>
-      <div className="row">
-        <button className="sm primary" onClick={parse}>Parse</button>
-        {keys.length > 0 && <button className="sm danger" onClick={() => onChange([])}>Clear all</button>}
-      </div>
+      {keys.length > 0 && (
+        <div className="note" style={{ marginTop: 8 }}>
+          ✓ {keys.length} valid pair{keys.length === 1 ? '' : 's'} parsed and ready to save.
+        </div>
+      )}
       {errors.length > 0 && <div className="note error" style={{ marginTop: 10 }}>{errors.join(' • ')}</div>}
       {keys.length > 0 && (
         <div style={{ marginTop: 12 }}>

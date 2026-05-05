@@ -41,6 +41,13 @@ const api = {
   ffmpeg: {
     locate: () => invoke(IPC.ffmpegLocate),
     setPath: (p: string) => invoke(IPC.ffmpegSetPath, p),
+    probe: (url: string, headers?: any) => invoke(IPC.ffmpegProbe, { url, headers }),
+    encoders: () => invoke(IPC.ffmpegEncoders),
+  },
+  updater: {
+    check: () => invoke(IPC.updaterCheck),
+    download: () => invoke(IPC.updaterDownload),
+    install: () => invoke(IPC.updaterInstall),
   },
   system: {
     pickFolder: () => invoke(IPC.systemPickFolder),
@@ -48,11 +55,12 @@ const api = {
     openPath: (p: string) => invoke(IPC.systemOpenPath, p),
     stats: () => invoke(IPC.systemStats),
   },
-  on: (channel: 'channelStatus' | 'log' | 'stats', cb: (payload: any) => void) => {
+  on: (channel: 'channelStatus' | 'log' | 'stats' | 'updater', cb: (payload: any) => void) => {
     const map = {
       channelStatus: IPC.eventChannelStatus,
       log: IPC.eventLog,
       stats: IPC.eventStats,
+      updater: IPC.eventUpdater,
     } as const;
     const handler = (_: any, payload: any) => cb(payload);
     ipcRenderer.on(map[channel], handler);

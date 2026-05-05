@@ -33,6 +33,13 @@ export const IPC = {
   // FFmpeg
   ffmpegLocate: 'ffmpeg:locate',
   ffmpegSetPath: 'ffmpeg:setPath',
+  ffmpegProbe: 'ffmpeg:probe',
+  ffmpegEncoders: 'ffmpeg:encoders',
+  // Updater
+  updaterCheck: 'updater:check',
+  updaterDownload: 'updater:download',
+  updaterInstall: 'updater:install',
+  eventUpdater: 'event:updater',
   // System
   systemPickFolder: 'system:pickFolder',
   systemPickFile: 'system:pickFile',

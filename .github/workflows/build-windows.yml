@@ -45,7 +45,16 @@ jobs:
         env:
           CSC_LINK: ${{ steps.cert.outputs.csc_link }}
           CSC_KEY_PASSWORD: ${{ secrets.WIN_CERT_PASSWORD }}
-        run: npx electron-builder --win --x64 --publish never
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        # Tagged pushes publish to GitHub Releases (latest.yml for updater).
+        # Other pushes/PRs only build artifacts.
+        run: |
+          if ($env:GITHUB_REF -like 'refs/tags/v*') {
+            npx electron-builder --win --x64 --publish always
+          } else {
+            npx electron-builder --win --x64 --publish never
+          }
+        shell: pwsh
 
       - name: Upload installer artifact
         uses: actions/upload-artifact@v4
@@ -56,13 +65,5 @@ jobs:
             release/*.zip
           if-no-files-found: error
 
-      - name: Create GitHub Release on tag
-        if: startsWith(github.ref, 'refs/tags/v')
-        uses: softprops/action-gh-release@v2
-        with:
-          files: |
-            release/*.exe
-            release/*.zip
-          generate_release_notes: true
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # Release publishing is handled by electron-builder's --publish flag
+      # on tag pushes (it uploads .exe + .zip + latest.yml for the auto-updater).

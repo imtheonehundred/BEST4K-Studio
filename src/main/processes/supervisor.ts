@@ -9,6 +9,7 @@ import { EventEmitter } from 'node:events';
 import type { Channel, ChannelRuntimeStats } from '../../shared/types';
 import { buildCommand } from '../ffmpeg/commandBuilder';
 import { locateFfmpeg } from '../ffmpeg/locate';
+import { detectEncoders } from '../ffmpeg/encoders';
 import { channelsRepo, logsRepo, settingsRepo } from '../database/repositories';
 import { maskString } from '../security/mask';
 
@@ -76,7 +77,7 @@ class Supervisor extends EventEmitter {
     for (const id of this.records.keys()) this.stop(id);
   }
 
-  private spawnOnce(channel: Channel, rec: RuntimeRecord) {
+  private async spawnOnce(channel: Channel, rec: RuntimeRecord) {
     const ffmpeg = locateFfmpeg();
     if (!ffmpeg) {
       rec.lastError = 'FFmpeg not found. Set the FFmpeg path in Settings.';
@@ -97,7 +98,8 @@ class Supervisor extends EventEmitter {
 
     let built;
     try {
-      built = buildCommand(activeChannel, { outputRoot: settings.defaultOutputFolder });
+      const encInfo = await detectEncoders().catch(() => ({ preferred: 'libx264' as string }));
+      built = buildCommand(activeChannel, { outputRoot: settings.defaultOutputFolder, autoEncoder: encInfo.preferred });
     } catch (e: any) {
       rec.lastError = e.message;
       channelsRepo.setStatus(channel.id, 'error', e.message);
