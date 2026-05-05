@@ -1,7 +1,7 @@
 // Build a sanitized FFmpeg argv array from a Channel definition.
 // We never use the shell; the Supervisor spawns argv directly.
 
-import type { Channel, ChannelHeaders } from '@shared/types';
+import type { Channel, ChannelHeaders } from '../../shared/types';
 import path from 'node:path';
 import fs from 'node:fs';
 

@@ -1,6 +1,6 @@
 // Thin ssh2 wrapper for testing connections and running install scripts.
 import { Client, ConnectConfig } from 'ssh2';
-import type { Server } from '@shared/types';
+import type { Server } from '../../shared/types';
 
 export interface RunResult {
   code: number | null;

@@ -6,7 +6,7 @@
 
 import { spawn, ChildProcess } from 'node:child_process';
 import { EventEmitter } from 'node:events';
-import type { Channel, ChannelRuntimeStats } from '@shared/types';
+import type { Channel, ChannelRuntimeStats } from '../../shared/types';
 import { buildCommand } from '../ffmpeg/commandBuilder';
 import { locateFfmpeg } from '../ffmpeg/locate';
 import { channelsRepo, logsRepo, settingsRepo } from '../database/repositories';

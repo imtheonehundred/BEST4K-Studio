@@ -1,7 +1,7 @@
 import { getDb } from './index';
 import type {
   Channel, ChannelInput, ChannelStatus, Server, ServerInput, Profile, LogEntry, AppSettings,
-} from '@shared/types';
+} from '../../shared/types';
 import { encryptSecret, decryptSecret } from '../security/crypto';
 
 function rowToChannel(r: any): Channel {
