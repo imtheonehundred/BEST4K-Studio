@@ -1,7 +1,7 @@
 // Detect which H.264 encoders this FFmpeg build supports. Used by the
 // command builder when the user sets encoder=auto, and surfaced in Settings.
 
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { locateFfmpeg } from './locate';
 
 export interface EncoderInfo {
@@ -10,7 +10,44 @@ export interface EncoderInfo {
   hardware: string[];      // subset that's hardware-accelerated
 }
 
+export interface CapabilityInfo {
+  hasDecryptionKey: boolean;        // -decryption_key (universal mov)
+  hasDecryptionKeysDict: boolean;   // -decryption_keys (FFmpeg 8+, multi-KID)
+  hasCencDecryptionKey: boolean;    // -cenc_decryption_key (downstream patch)
+  hasReconnectOnHttpError: boolean; // -reconnect_on_http_error
+  hasDashDemuxer: boolean;          // dash demuxer (libxml2 build)
+}
+
 let cache: EncoderInfo | null = null;
+let capCache: CapabilityInfo | null = null;
+
+// Synchronous capability probe. Runs once per session, caches result.
+// We pick the right CENC flag at command-build time based on this.
+export function detectCapabilities(force = false): CapabilityInfo {
+  if (capCache && !force) return capCache;
+  const ff = locateFfmpeg();
+  const empty: CapabilityInfo = {
+    hasDecryptionKey: false, hasDecryptionKeysDict: false,
+    hasCencDecryptionKey: false, hasReconnectOnHttpError: false,
+    hasDashDemuxer: false,
+  };
+  if (!ff) return capCache = empty;
+
+  const movHelp = spawnSync(ff, ['-hide_banner', '-h', 'demuxer=mov'], { encoding: 'utf8', timeout: 4000 });
+  const help = (movHelp.stdout || '') + (movHelp.stderr || '');
+  const demuxers = spawnSync(ff, ['-hide_banner', '-demuxers'], { encoding: 'utf8', timeout: 4000 });
+  const protoHelp = spawnSync(ff, ['-hide_banner', '-h', 'protocol=https'], { encoding: 'utf8', timeout: 4000 });
+  const protoOut = (protoHelp.stdout || '') + (protoHelp.stderr || '');
+
+  capCache = {
+    hasDecryptionKey: /-decryption_key\b/.test(help),
+    hasDecryptionKeysDict: /-decryption_keys\b/.test(help),
+    hasCencDecryptionKey: /-cenc_decryption_key\b/.test(help),
+    hasReconnectOnHttpError: /-reconnect_on_http_error\b/.test(protoOut),
+    hasDashDemuxer: /^\s*D\s+dash\b/m.test(demuxers.stdout || ''),
+  };
+  return capCache;
+}
 
 export function detectEncoders(force = false): Promise<EncoderInfo> {
   if (cache && !force) return Promise.resolve(cache);

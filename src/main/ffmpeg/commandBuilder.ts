@@ -4,6 +4,7 @@
 import type { Channel, ChannelHeaders } from '../../shared/types';
 import path from 'node:path';
 import fs from 'node:fs';
+import { detectCapabilities } from './encoders';
 
 export interface BuiltCommand {
   args: string[];
@@ -72,6 +73,8 @@ function inputProtocolOpts(c: Channel): string[] {
   // remote segments. Without this, segment loads silently fail.
   if (c.inputType === 'dash') {
     args.push('-allowed_extensions', 'ALL');
+    // Some downstream builds support these for live edge tracking.
+    args.push('-protocol_whitelist', 'file,http,https,tcp,tls,crypto');
   }
 
   if (c.inputType === 'hls') args.push(...HLS_LIVE_INPUT_OPTS);
@@ -124,22 +127,32 @@ export function buildCommand(c: Channel, opts: { outputRoot: string; autoEncoder
   args.push('-hide_banner', '-loglevel', 'info', '-stats');
   args.push(...inputProtocolOpts(c));
 
-  // CENC decryption: input option, must precede -i. The right flag depends
-  // on the demuxer FFmpeg picks for this source:
-  //   - DASH manifest (.mpd, or sourceType=dash) → -cenc_decryption_key
-  //   - MP4 / fMP4 / CMAF                         → -decryption_key
-  //   - HLS                                       → key URI fetched from
-  //     manifest; provide auth via headers, not -decryption_key
+  // CENC decryption — input option, must precede -i.
+  //
+  // We probe FFmpeg's actual help output (capability cache) and ONLY emit
+  // the flags this binary supports. Unknown options would otherwise cause
+  // FFmpeg to error out before opening the input.
+  //
+  // Priority order:
+  //   1. -decryption_keys "KID=KEY[:KID=KEY...]"  — multi-KID dict (FFmpeg
+  //      8.x+). Best for content with separate keys per track.
+  //   2. -decryption_key <hex>                    — single key, universal
+  //      (mov demuxer, works on FFmpeg 4.x onward). DASH segments are
+  //      fragments delegated to mov, so this path covers DASH+CENC too.
+  //   3. -cenc_decryption_key <hex>               — downstream (gyan.dev
+  //      / btbn) builds add this. Sent for DASH inputs only when present.
   const keys = getAuthorizedKeys(c);
-  if (keys?.length) {
-    const key = keys[0].key;
-    if (c.inputType === 'dash') {
-      args.push('-cenc_decryption_key', key);
-    } else if (c.inputType === 'mp4' || c.inputType === 'mpegts') {
-      args.push('-decryption_key', key);
+  if (keys?.length && c.inputType !== 'hls') {
+    const caps = detectCapabilities();
+    if (keys.length > 1 && caps.hasDecryptionKeysDict) {
+      const dict = keys.map(k => `${k.kid}=${k.key}`).join(':');
+      args.push('-decryption_keys', dict);
+    } else if (caps.hasDecryptionKey) {
+      args.push('-decryption_key', keys[0].key);
     }
-    // HLS encrypted content uses the manifest's #EXT-X-KEY URI; the headers
-    // tab carries any auth needed to fetch that key. No CLI flag.
+    if (c.inputType === 'dash' && caps.hasCencDecryptionKey) {
+      args.push('-cenc_decryption_key', keys[0].key);
+    }
   }
 
   args.push('-i', c.inputUrl);

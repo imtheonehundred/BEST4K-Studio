@@ -8,6 +8,9 @@ const SENSITIVE_KEYS = [
 export function maskString(s: string): string {
   if (!s) return s;
   let out = s;
+  // FFmpeg decryption args
+  out = out.replace(/(-decryption_keys?\s+)\S+/gi, '$1********');
+  out = out.replace(/(-cenc_decryption_keys?\s+)\S+/gi, '$1********');
   // hex 32+ -> redact
   out = out.replace(/\b[0-9a-fA-F]{32,}\b/g, m => m.slice(0, 4) + '…' + m.slice(-2));
   // url params with sensitive keys
