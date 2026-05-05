@@ -26,6 +26,10 @@ interface RuntimeRecord {
   backoffMs: number;
   failoverIndex: number;
   restartTimer?: NodeJS.Timeout;
+  // Sliding window of recent HTTP-error timestamps so we can detect a burst
+  // (rolling-window live source pulled too far back) and force a clean
+  // restart instead of letting FFmpeg spin on 404s.
+  httpErrorTimes: number[];
 }
 
 class Supervisor extends EventEmitter {
@@ -52,6 +56,7 @@ class Supervisor extends EventEmitter {
       desiredRunning: true,
       backoffMs: 1000,
       failoverIndex: 0,
+      httpErrorTimes: [],
     };
     rec.desiredRunning = true;
     this.records.set(channel.id, rec);
@@ -138,13 +143,30 @@ class Supervisor extends EventEmitter {
       if (fpsM) rec.lastFps = parseFloat(fpsM[1]);
       if (brM) rec.lastBitrateKbps = parseFloat(brM[1]);
       this.emitStats(channel.id);
-      // log lines (mask + dedupe noise)
+
+      // log lines (mask + classify)
       for (const line of text.split(/\r?\n/)) {
         const t = line.trim();
         if (!t) continue;
         const masked = maskString(t);
-        const level = /error|failed|invalid|404|403|connection refused/i.test(t) ? 'error' : 'info';
+        const isHttpErr = /HTTP error 4\d\d|Failed to open fragment|404 Not Found/i.test(t);
+        const level = (isHttpErr || /error|failed|invalid|403|connection refused/i.test(t)) ? 'error' : 'info';
         this.log(channel.id, level as any, masked);
+
+        if (isHttpErr) {
+          const now = Date.now();
+          rec.httpErrorTimes.push(now);
+          // keep only the last 30s of errors
+          rec.httpErrorTimes = rec.httpErrorTimes.filter(ts => now - ts < 30000);
+          // 8+ HTTP errors in 30s → live edge desync; force a clean restart
+          // so we re-fetch the manifest at the current live edge instead
+          // of spinning on segments that already rolled off the CDN.
+          if (rec.httpErrorTimes.length >= 8 && rec.proc && !rec.proc.killed) {
+            this.log(channel.id, 'warn', `HTTP error burst (${rec.httpErrorTimes.length} in 30s) — forcing clean restart`);
+            rec.httpErrorTimes = [];
+            try { rec.proc.kill('SIGTERM'); } catch {}
+          }
+        }
       }
     });
 

@@ -17,7 +17,22 @@ const HLS_LIVE_INPUT_OPTS = [
   '-reconnect_streamed', '1',
   '-reconnect_at_eof', '1',
   '-reconnect_delay_max', '5',
-  '-fflags', '+genpts+discardcorrupt',
+  '-reconnect_on_http_error', '4xx,5xx',
+  '-multiple_requests', '1',
+  '-rw_timeout', '8000000',
+  '-fflags', '+genpts+discardcorrupt+nobuffer',
+  '-avoid_negative_ts', 'make_zero',
+];
+
+const DASH_LIVE_INPUT_OPTS = [
+  '-reconnect', '1',
+  '-reconnect_streamed', '1',
+  '-reconnect_at_eof', '1',
+  '-reconnect_delay_max', '5',
+  '-reconnect_on_http_error', '4xx,5xx',
+  '-multiple_requests', '1',
+  '-rw_timeout', '8000000',
+  '-fflags', '+genpts+discardcorrupt+nobuffer',
   '-avoid_negative_ts', 'make_zero',
 ];
 
@@ -25,6 +40,7 @@ const RECONNECT_OPTS = [
   '-reconnect', '1',
   '-reconnect_streamed', '1',
   '-reconnect_delay_max', '5',
+  '-reconnect_on_http_error', '4xx,5xx',
   '-fflags', '+genpts+discardcorrupt',
 ];
 
@@ -59,7 +75,8 @@ function inputProtocolOpts(c: Channel): string[] {
   }
 
   if (c.inputType === 'hls') args.push(...HLS_LIVE_INPUT_OPTS);
-  else if (['mpegts', 'rtmp', 'rtsp', 'dash'].includes(c.inputType)) args.push(...RECONNECT_OPTS);
+  else if (c.inputType === 'dash') args.push(...DASH_LIVE_INPUT_OPTS);
+  else if (['mpegts', 'rtmp', 'rtsp'].includes(c.inputType)) args.push(...RECONNECT_OPTS);
   if (c.inputType === 'rtsp') args.push('-rtsp_transport', 'tcp');
 
   return args;
@@ -184,7 +201,12 @@ export function buildCommand(c: Channel, opts: { outputRoot: string; autoEncoder
     //    segment numbers that VLC treated as gaps and froze
     const hlsTime = c.output.hlsTime ?? 4;
     const hlsListSize = c.output.hlsListSize ?? 10;
+    // Output-side resilience: regenerate PTS so input timestamp jumps
+    // don't propagate (was causing VLC freeze ~30s on rolling DASH live);
+    // async resampling so audio drift doesn't drop frames.
     args.push(
+      '-fflags', '+genpts',
+      '-async', '1',
       '-f', 'hls',
       '-hls_time', String(hlsTime),
       '-hls_list_size', String(hlsListSize),
@@ -192,6 +214,7 @@ export function buildCommand(c: Channel, opts: { outputRoot: string; autoEncoder
       '-hls_delete_threshold', '1',
       '-hls_allow_cache', '0',
       '-hls_segment_type', 'mpegts',
+      '-hls_start_number_source', 'epoch',
       '-hls_segment_filename', path.join(dir, 'seg_%05d.ts'),
       path.join(dir, 'index.m3u8'),
     );
