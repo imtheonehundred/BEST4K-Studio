@@ -20,6 +20,9 @@ function createWindow() {
     backgroundColor: '#0b0d12',
     title: 'BEST4K Studio',
     autoHideMenuBar: true,
+    icon: process.platform === 'linux'
+      ? path.join(process.resourcesPath || '', 'icon.png')
+      : undefined,
     webPreferences: {
       preload: path.join(__dirname, '../preload/index.js'),
       contextIsolation: true,

@@ -1,4 +1,5 @@
 import React from 'react';
+import logoUrl from '../assets/logo.png';
 
 export type Page = 'dashboard' | 'channels' | 'servers' | 'profiles' | 'monitor' | 'logs' | 'settings';
 
@@ -21,7 +22,7 @@ export function Sidebar({ current, onChange }: Props) {
   return (
     <aside className="sidebar">
       <div className="brand">
-        <div className="logo">BEST<span className="gold">4K</span> STUDIO</div>
+        <img src={logoUrl} alt="BEST4K Studio" className="brand-logo" />
         <div className="tag">Premium Streaming Suite</div>
       </div>
       <nav className="nav">
