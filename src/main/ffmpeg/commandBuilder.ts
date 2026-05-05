@@ -1,0 +1,155 @@
+// Build a sanitized FFmpeg argv array from a Channel definition.
+// We never use the shell; the Supervisor spawns argv directly.
+
+import type { Channel, ChannelHeaders } from '@shared/types';
+import path from 'node:path';
+import fs from 'node:fs';
+
+export interface BuiltCommand {
+  args: string[];
+  outputDir?: string;
+  generatedLinks: { hls?: string; rtmp?: string; ts?: string };
+}
+
+const HLS_LIVE_INPUT_OPTS = [
+  '-live_start_index', '-3',
+  '-reconnect', '1',
+  '-reconnect_streamed', '1',
+  '-reconnect_at_eof', '1',
+  '-reconnect_delay_max', '5',
+  '-fflags', '+genpts+discardcorrupt',
+  '-avoid_negative_ts', 'make_zero',
+];
+
+const RECONNECT_OPTS = [
+  '-reconnect', '1',
+  '-reconnect_streamed', '1',
+  '-reconnect_delay_max', '5',
+  '-fflags', '+genpts+discardcorrupt',
+];
+
+function buildHeadersString(h?: ChannelHeaders): string | undefined {
+  if (!h) return undefined;
+  const lines: string[] = [];
+  if (h.referer) lines.push(`Referer: ${h.referer}`);
+  if (h.origin) lines.push(`Origin: ${h.origin}`);
+  if (h.cookie) lines.push(`Cookie: ${h.cookie}`);
+  if (h.authorization) lines.push(`Authorization: ${h.authorization}`);
+  if (h.custom) for (const [k, v] of Object.entries(h.custom)) lines.push(`${k}: ${v}`);
+  if (!lines.length) return undefined;
+  return lines.join('\r\n') + '\r\n';
+}
+
+function inputProtocolOpts(c: Channel): string[] {
+  const args: string[] = [];
+  const h = c.headers;
+  if (h?.userAgent) args.push('-user_agent', h.userAgent);
+  const hdr = buildHeadersString(h);
+  if (hdr) args.push('-headers', hdr);
+
+  if (c.inputType === 'hls') args.push(...HLS_LIVE_INPUT_OPTS);
+  else if (['mpegts', 'rtmp', 'rtsp', 'dash'].includes(c.inputType)) args.push(...RECONNECT_OPTS);
+  if (c.inputType === 'rtsp') args.push('-rtsp_transport', 'tcp');
+  return args;
+}
+
+function videoFilters(c: Channel): string | null {
+  const p = c.processing;
+  const filters: string[] = [];
+  if (p.scale === '720p') filters.push('scale=-2:720');
+  if (p.scale === '480p') filters.push('scale=-2:480');
+  if (p.blurBox) {
+    const { x, y, w, h } = p.blurBox;
+    // Crop, blur, overlay back.
+    filters.push(`split[base][b];[b]crop=${w}:${h}:${x}:${y},boxblur=20[bb];[base][bb]overlay=${x}:${y}`);
+  }
+  if (p.textWatermark) {
+    const safe = p.textWatermark.replace(/['"\\:]/g, ' ');
+    filters.push(`drawtext=text='${safe}':fontcolor=white@0.6:fontsize=18:x=10:y=10:box=1:boxcolor=black@0.4:boxborderw=4`);
+  }
+  return filters.length ? filters.join(',') : null;
+}
+
+function chooseEncoder(req: string | undefined): string {
+  switch (req) {
+    case 'h264_nvenc':
+    case 'h264_qsv':
+    case 'h264_amf':
+    case 'libx264':
+      return req;
+    default:
+      return 'libx264'; // safe default; supervisor can swap if HW detected.
+  }
+}
+
+export function buildCommand(c: Channel, opts: { outputRoot: string }): BuiltCommand {
+  const args: string[] = [];
+  args.push('-hide_banner', '-loglevel', 'info', '-stats');
+  args.push(...inputProtocolOpts(c));
+  args.push('-i', c.inputUrl);
+
+  const filter = videoFilters(c);
+  const isCopy = c.processing.mode === 'copy' && !filter && !c.processing.logoOverlayPath;
+
+  if (c.processing.logoOverlayPath && fs.existsSync(c.processing.logoOverlayPath)) {
+    args.push('-i', c.processing.logoOverlayPath);
+  }
+
+  if (isCopy) {
+    args.push('-c', 'copy');
+  } else {
+    const encoder = chooseEncoder(c.processing.encoder);
+    args.push('-c:v', encoder);
+    if (encoder === 'libx264') args.push('-preset', 'veryfast', '-tune', 'zerolatency');
+    if (c.processing.videoBitrate) args.push('-b:v', c.processing.videoBitrate, '-maxrate', c.processing.videoBitrate, '-bufsize', '4M');
+    args.push('-c:a', 'aac');
+    if (c.processing.audioBitrate) args.push('-b:a', c.processing.audioBitrate);
+    args.push('-pix_fmt', 'yuv420p');
+    args.push('-g', '60', '-sc_threshold', '0');
+    if (c.processing.logoOverlayPath && fs.existsSync(c.processing.logoOverlayPath)) {
+      const base = filter ? `[0:v]${filter}[v0];[v0][1:v]overlay=W-w-20:20[v]` : `[0:v][1:v]overlay=W-w-20:20[v]`;
+      args.push('-filter_complex', base, '-map', '[v]', '-map', '0:a?');
+    } else if (filter) {
+      args.push('-vf', filter);
+    }
+  }
+
+  const generatedLinks: BuiltCommand['generatedLinks'] = {};
+  let outputDir: string | undefined;
+
+  if (c.output.mode === 'hls_local') {
+    const dir = path.join(c.output.outputFolder || opts.outputRoot, c.slug);
+    fs.mkdirSync(dir, { recursive: true });
+    outputDir = dir;
+    const hlsTime = c.output.hlsTime ?? 3;
+    const hlsListSize = c.output.hlsListSize ?? 6;
+    args.push(
+      '-f', 'hls',
+      '-hls_time', String(hlsTime),
+      '-hls_list_size', String(hlsListSize),
+      '-hls_flags', 'delete_segments+independent_segments+append_list',
+      '-hls_delete_threshold', '3',
+      '-hls_segment_filename', path.join(dir, 'seg_%05d.ts'),
+      path.join(dir, 'index.m3u8'),
+    );
+    generatedLinks.hls = path.join(dir, 'index.m3u8');
+  } else if (c.output.mode === 'rtmp_push') {
+    if (!c.output.rtmpUrl) throw new Error('RTMP URL is required for rtmp_push');
+    let url = c.output.rtmpUrl.trim();
+    if (c.output.rtmpKey) {
+      url = url.replace(/\/$/, '') + '/' + c.output.rtmpKey;
+    }
+    args.push('-f', 'flv', url);
+    generatedLinks.rtmp = url;
+  } else if (c.output.mode === 'mpegts_local') {
+    const port = c.output.mpegtsPort ?? 9000;
+    const url = `udp://0.0.0.0:${port}?pkt_size=1316`;
+    args.push('-f', 'mpegts', url);
+    generatedLinks.ts = url;
+  }
+
+  return { args, outputDir, generatedLinks };
+}
+
+// Exported for tests / debugging.
+export const _internal = { buildHeadersString, videoFilters };
