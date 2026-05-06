@@ -47,6 +47,7 @@ export const IPC = {
   systemPickFolder: 'system:pickFolder',
   systemPickFile: 'system:pickFile',
   systemOpenPath: 'system:openPath',
+  systemOpenExternal: 'system:openExternal',
   systemStats: 'system:stats',
   // Events from main → renderer
   eventChannelStatus: 'event:channelStatus',

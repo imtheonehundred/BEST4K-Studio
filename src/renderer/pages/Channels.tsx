@@ -29,7 +29,18 @@ export function Channels() {
     await window.api.channels.duplicate(c.id);
     await refreshChannels();
   };
-  const onOpenLink = async (path: string) => { await window.api.system.openPath(path); };
+  const onOpenLink = async (link: string) => {
+    // For HTTP links we use shell.openExternal so VLC / the system's default
+    // .m3u8 handler picks them up. openPath is for filesystem paths only.
+    if (/^https?:\/\//.test(link)) {
+      await window.api.system.openExternal(link);
+    } else {
+      await window.api.system.openPath(link);
+    }
+  };
+  const onCopyLink = async (link: string) => {
+    try { await navigator.clipboard.writeText(link); } catch {}
+  };
 
   return (
     <div>
@@ -91,8 +102,11 @@ export function Channels() {
                         ) : (
                           <button className="danger sm" onClick={() => onStop(c)}>Stop</button>
                         )}
-                        {link !== '—' && link.endsWith('.m3u8') && (
-                          <button className="sm" onClick={() => onOpenLink(link.replace(/\/index\.m3u8$/, ''))}>Open</button>
+                        {link !== '—' && (
+                          <>
+                            <button className="sm" onClick={() => onOpenLink(link)}>Open</button>
+                            <button className="sm" onClick={() => onCopyLink(link)}>Copy</button>
+                          </>
                         )}
                         <button className="sm" onClick={() => setEditing(c)}>Edit</button>
                         <button className="sm" onClick={() => onDuplicate(c)}>Duplicate</button>

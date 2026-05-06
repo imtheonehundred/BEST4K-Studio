@@ -55,6 +55,7 @@ const api = {
     pickFolder: () => invoke(IPC.systemPickFolder),
     pickFile: (filters?: any) => invoke(IPC.systemPickFile, filters),
     openPath: (p: string) => invoke(IPC.systemOpenPath, p),
+    openExternal: (url: string) => invoke(IPC.systemOpenExternal, url),
     stats: () => invoke(IPC.systemStats),
   },
   on: (channel: 'channelStatus' | 'log' | 'stats' | 'updater' | 'ffmpegDownload', cb: (payload: any) => void) => {

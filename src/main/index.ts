@@ -10,6 +10,7 @@ import { locateFfmpeg, locateFfprobe, probeFfmpegVersion } from './ffmpeg/locate
 import { probeSource } from './ffmpeg/probe';
 import { detectEncoders } from './ffmpeg/encoders';
 import { downloadFfmpeg, existingDownload, type DownloadProgress } from './ffmpeg/downloader';
+import { startLocalServer, stopLocalServer } from './server/localServer';
 import { testConnection, installMediaMtx, rtmpPublishUrl, hlsPlaybackUrl } from './ssh/client';
 import { initUpdater, check as updaterCheck, download as updaterDownload, install as updaterInstall } from './updater';
 
@@ -157,6 +158,7 @@ function registerIpc() {
     return r.canceled ? null : r.filePaths[0];
   });
   ipcMain.handle(IPC.systemOpenPath, (_e, p: string) => shell.openPath(p));
+  ipcMain.handle(IPC.systemOpenExternal, (_e, url: string) => shell.openExternal(url));
   ipcMain.handle(IPC.systemStats, () => ({
     platform: process.platform,
     arch: process.arch,
@@ -174,6 +176,7 @@ app.on('window-all-closed', () => {
 
 app.whenReady().then(() => {
   getDb(); // ensure schema migrated before anything else.
+  startLocalServer();
   registerIpc();
   wireSupervisorEvents();
   createWindow();
@@ -194,4 +197,5 @@ app.whenReady().then(() => {
 
 app.on('before-quit', () => {
   supervisor.stopAll();
+  stopLocalServer();
 });

@@ -5,6 +5,7 @@ import type { Channel, ChannelHeaders } from '../../shared/types';
 import path from 'node:path';
 import fs from 'node:fs';
 import { detectCapabilities } from './encoders';
+import { getLocalHlsUrl, getLocalTsUrl } from '../server/localServer';
 
 export interface BuiltCommand {
   args: string[];
@@ -124,7 +125,7 @@ function chooseEncoder(req: string | undefined, autoPreferred?: string): string 
 
 export function buildCommand(c: Channel, opts: { outputRoot: string; autoEncoder?: string }): BuiltCommand {
   const args: string[] = [];
-  args.push('-hide_banner', '-loglevel', 'info', '-stats');
+  args.push('-hide_banner', '-nostdin', '-loglevel', 'info', '-stats');
   args.push(...inputProtocolOpts(c));
 
   // CENC decryption — input option, must precede -i.
@@ -228,10 +229,13 @@ export function buildCommand(c: Channel, opts: { outputRoot: string; autoEncoder
       '-hls_allow_cache', '0',
       '-hls_segment_type', 'mpegts',
       '-hls_start_number_source', 'epoch',
-      '-hls_segment_filename', path.join(dir, 'seg_%05d.ts'),
+      '-hls_segment_filename', path.join(dir, 'segment_%05d.ts'),
       path.join(dir, 'index.m3u8'),
     );
-    generatedLinks.hls = path.join(dir, 'index.m3u8');
+    // The generated link points at our local HTTP server, NOT a file path.
+    // VLC follows live HLS over HTTP correctly (re-fetches the playlist each
+    // segment cycle). With file:// VLC reads once and freezes after ~30s.
+    generatedLinks.hls = getLocalHlsUrl(c.slug);
   } else if (c.output.mode === 'rtmp_push') {
     if (!c.output.rtmpUrl) throw new Error('RTMP URL is required for rtmp_push');
     let url = c.output.rtmpUrl.trim();
@@ -241,10 +245,19 @@ export function buildCommand(c: Channel, opts: { outputRoot: string; autoEncoder
     args.push('-f', 'flv', url);
     generatedLinks.rtmp = url;
   } else if (c.output.mode === 'mpegts_local') {
-    const port = c.output.mpegtsPort ?? 9000;
-    const url = `udp://0.0.0.0:${port}?pkt_size=1316`;
-    args.push('-f', 'mpegts', url);
-    generatedLinks.ts = url;
+    // Two outputs: a local file for the HTTP server to stream, and (optional)
+    // UDP if a port was set so external receivers can subscribe.
+    const dir = path.join(c.output.outputFolder || opts.outputRoot, c.slug);
+    fs.mkdirSync(dir, { recursive: true });
+    outputDir = dir;
+    const tsFile = path.join(dir, `${c.slug}.ts`);
+    args.push('-f', 'mpegts', tsFile);
+    generatedLinks.ts = getLocalTsUrl(c.slug);
+    if (c.output.mpegtsPort) {
+      // Tee won't work mid-pipeline cleanly with the HTTP file path here, so
+      // we keep UDP as a future option. For now the local file + HTTP route
+      // is what VLC consumes.
+    }
   }
 
   return { args, outputDir, generatedLinks };
