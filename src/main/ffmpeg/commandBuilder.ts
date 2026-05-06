@@ -130,29 +130,35 @@ export function buildCommand(c: Channel, opts: { outputRoot: string; autoEncoder
 
   // CENC decryption — input option, must precede -i.
   //
-  // We probe FFmpeg's actual help output (capability cache) and ONLY emit
-  // the flags this binary supports. Unknown options would otherwise cause
-  // FFmpeg to error out before opening the input.
+  // Each FFmpeg demuxer has its OWN flag set:
+  //   - DASH demuxer (.mpd):
+  //       -cenc_decryption_key  <hex>          (single)
+  //       -cenc_decryption_keys "KID:KEY,..."  (multi-KID)
+  //   - mov / mp4 / cmaf demuxer:
+  //       -decryption_key  <hex>               (single)
+  //       -decryption_keys "KID=KEY:KID=KEY"   (multi-KID, FFmpeg 8+)
   //
-  // Priority order:
-  //   1. -decryption_keys "KID=KEY[:KID=KEY...]"  — multi-KID dict (FFmpeg
-  //      8.x+). Best for content with separate keys per track.
-  //   2. -decryption_key <hex>                    — single key, universal
-  //      (mov demuxer, works on FFmpeg 4.x onward). DASH segments are
-  //      fragments delegated to mov, so this path covers DASH+CENC too.
-  //   3. -cenc_decryption_key <hex>               — downstream (gyan.dev
-  //      / btbn) builds add this. Sent for DASH inputs only when present.
+  // The dash demuxer DOES NOT accept -decryption_key, and vice versa —
+  // FFmpeg errors with "Option not found" if you cross them. Verified
+  // against FFmpeg 8.1.1 (evermeet) on a real DASH+Widevine source.
   const keys = getAuthorizedKeys(c);
   if (keys?.length && c.inputType !== 'hls') {
     const caps = detectCapabilities();
-    if (keys.length > 1 && caps.hasDecryptionKeysDict) {
-      const dict = keys.map(k => `${k.kid}=${k.key}`).join(':');
-      args.push('-decryption_keys', dict);
-    } else if (caps.hasDecryptionKey) {
-      args.push('-decryption_key', keys[0].key);
-    }
-    if (c.inputType === 'dash' && caps.hasCencDecryptionKey) {
-      args.push('-cenc_decryption_key', keys[0].key);
+    if (c.inputType === 'dash') {
+      if (keys.length > 1 && caps.hasCencDecryptionKeys) {
+        const dict = keys.map(k => `${k.kid}:${k.key}`).join(',');
+        args.push('-cenc_decryption_keys', dict);
+      } else if (caps.hasCencDecryptionKey) {
+        args.push('-cenc_decryption_key', keys[0].key);
+      }
+    } else {
+      // mp4, cmaf, mpegts, etc. — mov demuxer flags
+      if (keys.length > 1 && caps.hasDecryptionKeysDict) {
+        const dict = keys.map(k => `${k.kid}=${k.key}`).join(':');
+        args.push('-decryption_keys', dict);
+      } else if (caps.hasDecryptionKey) {
+        args.push('-decryption_key', keys[0].key);
+      }
     }
   }
 
