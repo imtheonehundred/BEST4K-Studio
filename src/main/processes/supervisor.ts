@@ -21,14 +21,14 @@ interface RuntimeRecord {
   desiredRunning: boolean;
   lastBitrateKbps?: number;
   lastFps?: number;
+  lastFrameAt?: number;          // last time stderr reported new fps/bitrate
+  stalled?: boolean;             // we've already demoted to reconnecting
   lastError?: string | null;
   generatedLinks?: ChannelRuntimeStats['generatedLinks'];
   backoffMs: number;
   failoverIndex: number;
   restartTimer?: NodeJS.Timeout;
-  // Sliding window of recent HTTP-error timestamps so we can detect a burst
-  // (rolling-window live source pulled too far back) and force a clean
-  // restart instead of letting FFmpeg spin on 404s.
+  stallTimer?: NodeJS.Timeout;
   httpErrorTimes: number[];
 }
 
@@ -131,15 +131,46 @@ class Supervisor extends EventEmitter {
         startedConfirmed = true;
         channelsRepo.setStatus(channel.id, 'running', null);
         this.emitStatus(channel.id, 'running');
-        rec.backoffMs = 1000; // reset backoff after successful start
+        rec.backoffMs = 1000;
       }
     }, 3000);
+
+    // Stall watchdog: if FFmpeg hasn't produced an fps/bitrate update for >10s
+    // after starting, we know the input pipeline is stalled (HTTP reconnect
+    // loop, EOF spam, slow source). Demote status to `reconnecting` so the
+    // user sees what's happening, and force a clean restart after 25s.
+    rec.lastFrameAt = Date.now();
+    rec.stalled = false;
+    if (rec.stallTimer) clearInterval(rec.stallTimer);
+    rec.stallTimer = setInterval(() => {
+      if (!rec.proc || rec.proc.killed) return;
+      const idleMs = Date.now() - (rec.lastFrameAt || 0);
+      if (idleMs > 10_000 && !rec.stalled) {
+        rec.stalled = true;
+        channelsRepo.setStatus(channel.id, 'reconnecting', 'No frames in 10s — input may be stalled');
+        this.emitStatus(channel.id, 'reconnecting');
+        this.log(channel.id, 'warn', `No output frames for ${(idleMs / 1000).toFixed(0)}s — input pipeline may be stalled`);
+      }
+      if (idleMs > 25_000 && rec.proc && !rec.proc.killed) {
+        this.log(channel.id, 'warn', `Forcing clean restart after ${(idleMs / 1000).toFixed(0)}s of no output`);
+        try { rec.proc.kill('SIGTERM'); } catch {}
+      }
+    }, 2000);
 
     proc.stderr?.on('data', (chunk: Buffer) => {
       const text = chunk.toString();
       // parse fps/bitrate
       const fpsM = text.match(/fps=\s*([\d.]+)/);
       const brM = text.match(/bitrate=\s*([\d.]+)\s*kbits\/s/);
+      if (fpsM || brM) {
+        rec.lastFrameAt = Date.now();
+        // Frames are flowing again — clear stall demotion if previously set.
+        if (rec.stalled && rec.proc && !rec.proc.killed) {
+          rec.stalled = false;
+          channelsRepo.setStatus(channel.id, 'running', null);
+          this.emitStatus(channel.id, 'running');
+        }
+      }
       if (fpsM) rec.lastFps = parseFloat(fpsM[1]);
       if (brM) rec.lastBitrateKbps = parseFloat(brM[1]);
       this.emitStats(channel.id);
@@ -182,6 +213,7 @@ class Supervisor extends EventEmitter {
 
     proc.on('exit', (code, signal) => {
       clearTimeout(startedTimer);
+      if (rec.stallTimer) { clearInterval(rec.stallTimer); rec.stallTimer = undefined; }
       rec.proc = undefined;
       this.log(channel.id, 'info', `Exited (code=${code ?? 'null'}, signal=${signal ?? 'null'})`);
 
@@ -230,8 +262,11 @@ class Supervisor extends EventEmitter {
     if (r) this.emit('stats', this.snapshot(r));
   }
   private log(channelId: number | null, level: 'info' | 'warn' | 'error' | 'debug', message: string) {
-    try { logsRepo.insert(channelId, level, message); } catch {}
-    this.emit('log', { channelId, level, message, ts: new Date().toISOString() });
+    // Cap any single log line so a runaway stderr (or upstream HTML dump)
+    // can't blow up the database or the renderer's log stream.
+    const safe = message.length > 1000 ? message.slice(0, 1000) + '… [truncated]' : message;
+    try { logsRepo.insert(channelId, level, safe); } catch {}
+    this.emit('log', { channelId, level, message: safe, ts: new Date().toISOString() });
   }
 }
 

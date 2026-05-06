@@ -34,8 +34,16 @@ export function initUpdater() {
   });
   autoUpdater.on('update-not-available', () => broadcast({ type: 'none' }));
   autoUpdater.on('error', (e) => {
-    logsRepo.insert(null, 'warn', `Updater error: ${e.message}`);
-    broadcast({ type: 'error', message: e.message });
+    // Truncate aggressively — electron-updater inlines the entire upstream
+    // response body (HTML 404 page on missing release, 1KB+ XML, etc.) into
+    // its Error.message, which floods the log table and makes the Logs and
+    // Monitor pages unreadable. Keep just the headline.
+    const raw = (e?.message || String(e)).split('\n')[0].trim();
+    const short = raw.length > 200 ? raw.slice(0, 200) + '…' : raw;
+    // Demote to debug so it doesn't appear in default log views — there is
+    // nothing actionable for the user when the latest.yml isn't published yet.
+    logsRepo.insert(null, 'debug', `Updater: ${short}`);
+    broadcast({ type: 'error', message: short });
   });
   autoUpdater.on('download-progress', p => broadcast({ type: 'progress', percent: p.percent, bytesPerSecond: p.bytesPerSecond }));
   autoUpdater.on('update-downloaded', info => {
